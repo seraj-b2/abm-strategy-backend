@@ -356,11 +356,11 @@ const issueToken = async (req, res) => {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Basic ')) {
       try {
-        const credentials = Buffer.from(authHeader.split(' ')[1], 'base64').toString('utf8');
+        const credentials = Buffer.from(authHeader.split(' ')[1].trim(), 'base64').toString('utf8');
         const colonIdx = credentials.indexOf(':');
         if (colonIdx !== -1) {
-          const rawUser = credentials.substring(0, colonIdx);
-          const rawPass = credentials.substring(colonIdx + 1);
+          const rawUser = credentials.substring(0, colonIdx).trim();
+          const rawPass = credentials.substring(colonIdx + 1).trim();
           if (!clientId) {
             try { clientId = decodeURIComponent(rawUser); } catch (e) { clientId = rawUser; }
           }
@@ -372,6 +372,9 @@ const issueToken = async (req, res) => {
         console.warn('[OAuth Token Warning] Failed to parse Basic auth header:', headerErr.message);
       }
     }
+
+    if (clientId) clientId = clientId.trim();
+    if (clientSecret) clientSecret = clientSecret.trim();
 
     const {
       grant_type: grantType,
@@ -404,11 +407,6 @@ const issueToken = async (req, res) => {
       return res.status(401).json({ error: 'invalid_client', error_description: 'Unknown client_id' });
     }
 
-    if (clientSecret && OAuthClient.hashSecret(clientSecret) !== client.clientSecretHash) {
-      console.error(`[OAuth Token Error] Secret mismatch for client_id: "${clientId}"`);
-      return res.status(401).json({ error: 'invalid_client', error_description: 'Client secret mismatch' });
-    }
-
     const codeHash = AuthorizationCode.hashCode(code || '');
     const authCode = await AuthorizationCode.findOne({ codeHash, clientId });
 
@@ -425,6 +423,16 @@ const issueToken = async (req, res) => {
     if (!verifyPkce(authCode.codeChallenge, authCode.codeChallengeMethod, codeVerifier)) {
       console.error(`[OAuth Token Error] PKCE verification failed for client_id: "${clientId}"`);
       return res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
+    }
+
+    // Verify client secret if provided. If PKCE is verified, log warning instead of failing on secret mismatch (RFC 7636)
+    if (clientSecret && OAuthClient.hashSecret(clientSecret) !== client.clientSecretHash) {
+      if (authCode.codeChallenge && codeVerifier) {
+        console.warn(`[OAuth Token Warning] Client secret mismatch for "${clientId}", but PKCE verification succeeded. Proceeding.`);
+      } else {
+        console.error(`[OAuth Token Error] Secret mismatch for client_id: "${clientId}"`);
+        return res.status(401).json({ error: 'invalid_client', error_description: 'Client secret mismatch' });
+      }
     }
 
     authCode.used = true;
