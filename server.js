@@ -8,6 +8,8 @@ const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 const tokenRoutes = require('./routes/tokenRoutes');
 const mcpRoutes = require('./routes/mcpRoutes');
+const oauthRoutes = require('./routes/oauthRoutes');
+const { getAuthorizationServerMetadata } = require('./controllers/oauthController');
 
 const app = express();
 
@@ -36,10 +38,14 @@ app.get('/health', (req, res) => {
   });
 });
 
+// OAuth 2.0 Authorization Server metadata (RFC 8414) - must be at root
+app.get('/.well-known/oauth-authorization-server', getAuthorizationServerMetadata);
+
 // API Routes
 app.use('/auth', authRoutes);
 app.use('/tokens', tokenRoutes);
 app.use('/mcp', mcpRoutes);
+app.use('/oauth', oauthRoutes);
 
 // 404 Handler
 app.use((req, res) => {
