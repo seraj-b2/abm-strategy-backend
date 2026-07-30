@@ -14,6 +14,11 @@ const { getAuthorizationServerMetadata } = require('./controllers/oauthControlle
 
 const app = express();
 
+// Trust the nginx reverse proxy's X-Forwarded-Proto/Host headers so
+// req.protocol reflects the original https:// request instead of the
+// plain-http connection nginx makes to this process.
+app.set('trust proxy', true);
+
 // Connect to MongoDB database
 connectDB();
 
