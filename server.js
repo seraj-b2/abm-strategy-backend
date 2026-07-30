@@ -62,6 +62,7 @@ app.get('/.well-known/openid-configuration', getAuthorizationServerMetadata);
 app.use('/auth', authRoutes);
 app.use('/tokens', tokenRoutes);
 app.use('/mcp', mcpRoutes);
+app.use('/api/mcp', mcpRoutes);
 app.use('/oauth', oauthRoutes);
 
 // 404 Handler
