@@ -12,6 +12,37 @@ const JWT_SECRET = process.env.JWT_SECRET || 'abm_strategy_secret_jwt_key_2026_d
 
 const AUTH_CODE_TTL_MS = 10 * 60 * 1000;
 
+function performRedirect(res, targetUrl) {
+  const urlStr = targetUrl.toString();
+  res.setHeader('Content-Type', 'text/html');
+  return res.status(200).send(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Redirecting...</title>
+  <meta http-equiv="refresh" content="0;url=${urlStr}" />
+</head>
+<body style="font-family: system-ui, sans-serif; background: #0B0F17; color: #e2e8f0; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
+  <div style="background: #111827; padding: 2.5rem; border-radius: 12px; text-align: center; max-width: 360px;">
+    <h2 style="font-size: 1.25rem; margin-bottom: 1rem; color: #34d399;">Authentication successful!</h2>
+    <p style="font-size: 0.9rem; color: #9ca3af; margin-bottom: 1.5rem;">Redirecting back to application...</p>
+    <a href="${urlStr}" style="color: #60a5fa; text-decoration: none; font-size: 0.875rem;">Click here if you are not redirected automatically &rarr;</a>
+  </div>
+  <script>
+    try {
+      if (window.top) {
+        window.top.location.href = ${JSON.stringify(urlStr)};
+      } else {
+        window.location.href = ${JSON.stringify(urlStr)};
+      }
+    } catch (e) {
+      window.location.href = ${JSON.stringify(urlStr)};
+    }
+  </script>
+</body>
+</html>`);
+}
+
 function getBaseUrl(req) {
   // nginx strips the /api prefix before proxying to this service, so the
   // externally-visible base URL (including /api) cannot be derived from the
@@ -287,7 +318,7 @@ const submitAuthorizePage = async (req, res) => {
     redirectUrl.searchParams.set('code', rawCode);
     if (state) redirectUrl.searchParams.set('state', state);
 
-    return res.redirect(302, redirectUrl.toString());
+    return performRedirect(res, redirectUrl);
   } catch (error) {
     console.error('[OAuth Authorize Error]', error);
     return res.status(500).json({ error: 'server_error', error_description: error.message });
@@ -460,7 +491,7 @@ const handleGoogleCallback = async (req, res) => {
     finalRedirect.searchParams.set('code', rawCode);
     if (state) finalRedirect.searchParams.set('state', state);
 
-    return res.redirect(302, finalRedirect.toString());
+    return performRedirect(res, finalRedirect);
   } catch (error) {
     console.error('[Google Callback Error]', error);
     return res.status(500).send(renderLoginPage({ error: 'Google login failed: ' + error.message }));
