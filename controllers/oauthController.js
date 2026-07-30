@@ -83,7 +83,11 @@ const getAuthorizationServerMetadata = (req, res) => {
  */
 const registerClient = async (req, res) => {
   try {
-    const { redirect_uris: redirectUris, client_name: clientName } = req.body;
+    const {
+      redirect_uris: redirectUris,
+      client_name: clientName,
+      token_endpoint_auth_method: tokenEndpointAuthMethod
+    } = req.body;
 
     if (!Array.isArray(redirectUris) || redirectUris.length === 0) {
       return res.status(400).json({
@@ -102,12 +106,14 @@ const registerClient = async (req, res) => {
       redirectUris
     });
 
+    const authMethod = tokenEndpointAuthMethod || 'client_secret_post';
+
     return res.status(201).json({
       client_id: clientId,
       client_secret: clientSecret,
       client_name: clientName || 'MCP Client',
       redirect_uris: redirectUris,
-      token_endpoint_auth_method: 'client_secret_post',
+      token_endpoint_auth_method: authMethod,
       grant_types: ['authorization_code'],
       response_types: ['code']
     });
@@ -353,8 +359,14 @@ const issueToken = async (req, res) => {
         const credentials = Buffer.from(authHeader.split(' ')[1], 'base64').toString('utf8');
         const colonIdx = credentials.indexOf(':');
         if (colonIdx !== -1) {
-          clientId = clientId || decodeURIComponent(credentials.substring(0, colonIdx));
-          clientSecret = clientSecret || decodeURIComponent(credentials.substring(colonIdx + 1));
+          const rawUser = credentials.substring(0, colonIdx);
+          const rawPass = credentials.substring(colonIdx + 1);
+          if (!clientId) {
+            try { clientId = decodeURIComponent(rawUser); } catch (e) { clientId = rawUser; }
+          }
+          if (!clientSecret) {
+            try { clientSecret = decodeURIComponent(rawPass); } catch (e) { clientSecret = rawPass; }
+          }
         }
       } catch (headerErr) {
         console.warn('[OAuth Token Warning] Failed to parse Basic auth header:', headerErr.message);
@@ -368,20 +380,32 @@ const issueToken = async (req, res) => {
       code_verifier: codeVerifier
     } = req.body;
 
+    console.log('[OAuth Token Request Received]', {
+      clientId,
+      hasSecret: !!clientSecret,
+      grantType,
+      hasCode: !!code,
+      redirectUri,
+      hasCodeVerifier: !!codeVerifier
+    });
+
     if (grantType !== 'authorization_code') {
       return res.status(400).json({ error: 'unsupported_grant_type' });
     }
 
     if (!clientId) {
+      console.error('[OAuth Token Error] Missing client_id');
       return res.status(401).json({ error: 'invalid_client', error_description: 'Missing client_id' });
     }
 
     const client = await OAuthClient.findOne({ clientId });
     if (!client) {
+      console.error(`[OAuth Token Error] Unknown client_id: "${clientId}"`);
       return res.status(401).json({ error: 'invalid_client', error_description: 'Unknown client_id' });
     }
 
     if (clientSecret && OAuthClient.hashSecret(clientSecret) !== client.clientSecretHash) {
+      console.error(`[OAuth Token Error] Secret mismatch for client_id: "${clientId}"`);
       return res.status(401).json({ error: 'invalid_client', error_description: 'Client secret mismatch' });
     }
 
@@ -389,14 +413,17 @@ const issueToken = async (req, res) => {
     const authCode = await AuthorizationCode.findOne({ codeHash, clientId });
 
     if (!authCode || authCode.used || authCode.expiresAt < new Date()) {
+      console.error(`[OAuth Token Error] Code invalid/expired/used for client_id: "${clientId}"`);
       return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code is invalid, expired, or already used' });
     }
 
     if (authCode.redirectUri !== redirectUri) {
+      console.error(`[OAuth Token Error] redirect_uri mismatch. Code URI: "${authCode.redirectUri}", Token URI: "${redirectUri}"`);
       return res.status(400).json({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' });
     }
 
     if (!verifyPkce(authCode.codeChallenge, authCode.codeChallengeMethod, codeVerifier)) {
+      console.error(`[OAuth Token Error] PKCE verification failed for client_id: "${clientId}"`);
       return res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
     }
 
@@ -413,6 +440,8 @@ const issueToken = async (req, res) => {
       tokenPrefix: `${rawToken.substring(0, 14)}...${rawToken.substring(rawToken.length - 4)}`,
       scopes: ['abm:read', 'abm:write', 'mcp:execute']
     });
+
+    console.log(`[OAuth Token Success] Issued token for user ${authCode.userId} and client ${clientId}`);
 
     return res.status(200).json({
       access_token: rawToken,
