@@ -27,7 +27,7 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-        'script-src': ["'self'", 'https://accounts.google.com'],
+        'script-src': ["'self'", "'unsafe-inline'", 'https://accounts.google.com'],
         'frame-src': ['https://accounts.google.com']
       }
     }

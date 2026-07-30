@@ -86,7 +86,7 @@ const registerClient = async (req, res) => {
   }
 };
 
-function renderLoginPage({ error, loginUri } = {}) {
+function renderLoginPage({ error } = {}) {
   return `<!doctype html>
 <html>
 <head>
@@ -106,11 +106,24 @@ function renderLoginPage({ error, loginUri } = {}) {
     ${error ? `<div class="error">${error}</div>` : ''}
     <div id="g_id_onload"
       data-client_id="${googleClientId}"
-      data-login_uri="${loginUri}"
-      data-ux_mode="redirect">
+      data-callback="handleCredentialResponse"
+      data-auto_select="false">
     </div>
-    <div class="g_id_signin" data-type="standard"></div>
+    <div class="g_id_signin" data-type="standard" data-theme="outline" data-size="large"></div>
+
+    <form id="loginForm" method="POST" action="" style="display:none;">
+      <input type="hidden" name="credential" id="credentialInput" />
+    </form>
   </div>
+
+  <script>
+    function handleCredentialResponse(response) {
+      if (response && response.credential) {
+        document.getElementById('credentialInput').value = response.credential;
+        document.getElementById('loginForm').submit();
+      }
+    }
+  </script>
 </body>
 </html>`;
 }
@@ -164,17 +177,13 @@ const showAuthorizePage = async (req, res) => {
     { expiresIn: '15m' }
   );
 
-  // Store in HTTP-Only cookie so data-login_uri remains a static URL without query parameters
+  // Store in HTTP-Only cookie so form POST back reads session state cleanly
   const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https' || (process.env.PUBLIC_BASE_URL && process.env.PUBLIC_BASE_URL.startsWith('https'));
   const cookieFlags = `Path=/; HttpOnly; ${isSecure ? 'SameSite=None; Secure' : 'SameSite=Lax'}; Max-Age=900`;
   res.setHeader('Set-Cookie', `mcp_auth_req=${encodeURIComponent(authReqToken)}; ${cookieFlags}`);
 
-  // Static loginUri matching Google Cloud Console Authorized Redirect URIs exactly
-  const baseUrl = getBaseUrl(req);
-  const loginUri = `${baseUrl}/oauth/authorize`;
-
   res.setHeader('Content-Type', 'text/html');
-  return res.status(200).send(renderLoginPage({ loginUri }));
+  return res.status(200).send(renderLoginPage());
 };
 
 /**
@@ -201,10 +210,8 @@ const submitAuthorizePage = async (req, res) => {
       codeChallengeMethod = decoded.codeChallengeMethod;
     } catch (err) {
       console.error('[OAuth Authorize Error] Invalid or expired auth_req token:', err.message);
-      const baseUrl = getBaseUrl(req);
-      const loginUri = `${baseUrl}/oauth/authorize`;
       res.setHeader('Content-Type', 'text/html');
-      return res.status(400).send(renderLoginPage({ error: 'Session expired. Please try connecting again from your application.', loginUri }));
+      return res.status(400).send(renderLoginPage({ error: 'Session expired. Please try connecting again from your application.' }));
     }
   }
 
@@ -229,10 +236,8 @@ const submitAuthorizePage = async (req, res) => {
       if (decoded && decoded.email) {
         payload = decoded;
       } else {
-        const baseUrl = getBaseUrl(req);
-        const loginUri = `${baseUrl}/oauth/authorize`;
         res.setHeader('Content-Type', 'text/html');
-        return res.status(400).send(renderLoginPage({ error: 'Sign-in failed. Please try again.', loginUri }));
+        return res.status(400).send(renderLoginPage({ error: 'Sign-in failed. Please try again.' }));
       }
     }
 
