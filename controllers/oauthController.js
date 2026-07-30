@@ -111,6 +111,12 @@ function renderLoginPage({ error } = {}) {
     </div>
     <div class="g_id_signin" data-type="standard" data-theme="outline" data-size="large"></div>
 
+    <div style="margin-top: 1.5rem; font-size: 0.85rem; border-top: 1px solid #1f2937; padding-top: 1rem;">
+      <a href="/api/oauth/google-direct" style="color: #60a5fa; text-decoration: none;">
+        Sign in with Google (Direct Web) &rarr;
+      </a>
+    </div>
+
     <form id="loginForm" method="POST" action="" style="display:none;">
       <input type="hidden" name="credential" id="credentialInput" />
     </form>
@@ -366,11 +372,107 @@ const issueToken = async (req, res) => {
     return res.status(500).json({ error: 'server_error', error_description: error.message });
   }
 };
+/**
+ * GET /oauth/google-direct
+ * Redirects to Google's standard OAuth 2.0 Web sign-in URL
+ */
+const handleDirectGoogleLogin = (req, res) => {
+  const baseUrl = getBaseUrl(req);
+  const redirectUri = `${baseUrl}/oauth/google-callback`;
+  const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=openid%20email%20profile&prompt=select_account`;
+  return res.redirect(302, googleAuthUrl);
+};
+
+/**
+ * GET /oauth/google-callback
+ * Handles callback from Google's standard OAuth flow
+ */
+const handleGoogleCallback = async (req, res) => {
+  const { code } = req.query;
+  const baseUrl = getBaseUrl(req);
+  const redirectUri = `${baseUrl}/oauth/google-callback`;
+
+  const authReqToken = getCookie(req, 'mcp_auth_req');
+  if (!authReqToken) {
+    return res.status(400).send(renderLoginPage({ error: 'Session expired. Please try connecting again.' }));
+  }
+
+  let oauthState;
+  try {
+    oauthState = jwt.verify(authReqToken, JWT_SECRET);
+  } catch (err) {
+    return res.status(400).send(renderLoginPage({ error: 'Session expired. Please try connecting again.' }));
+  }
+
+  const { clientId, redirectUri: mcpRedirectUri, state, codeChallenge, codeChallengeMethod } = oauthState;
+
+  try {
+    const oauth2Client = new OAuth2Client(googleClientId, process.env.GOOGLE_CLIENT_SECRET || '', redirectUri);
+    const { tokens } = await oauth2Client.getToken(code);
+    let payload;
+    if (tokens.id_token) {
+      const ticket = await oauth2Client.verifyIdToken({ idToken: tokens.id_token, audience: googleClientId });
+      payload = ticket.getPayload();
+    } else {
+      const decoded = jwt.decode(tokens.access_token);
+      payload = decoded;
+    }
+
+    const { sub: googleId, email, name, given_name, family_name, picture } = payload;
+
+    let user = await User.findOne({ $or: [{ googleId }, { googleSub: googleId }, { email }] });
+    if (user) {
+      user.googleId = googleId || user.googleId;
+      user.googleSub = googleId || user.googleSub;
+      user.name = name || user.name;
+      user.givenName = given_name || user.givenName;
+      user.familyName = family_name || user.familyName;
+      user.picture = picture || user.picture;
+      user.lastLoginAt = new Date();
+      await user.save();
+    } else {
+      user = await User.create({
+        googleId,
+        googleSub: googleId,
+        email,
+        name: name || email.split('@')[0],
+        givenName: given_name || '',
+        familyName: family_name || '',
+        picture: picture || '',
+        lastLoginAt: new Date()
+      });
+    }
+
+    const rawCode = AuthorizationCode.generateRawCode();
+    await AuthorizationCode.create({
+      codeHash: AuthorizationCode.hashCode(rawCode),
+      clientId,
+      userId: user._id,
+      redirectUri: mcpRedirectUri,
+      codeChallenge: codeChallenge || null,
+      codeChallengeMethod: codeChallengeMethod || null,
+      expiresAt: new Date(Date.now() + AUTH_CODE_TTL_MS)
+    });
+
+    res.setHeader('Set-Cookie', 'mcp_auth_req=; Path=/; HttpOnly; Max-Age=0');
+
+    const finalRedirect = new URL(mcpRedirectUri);
+    finalRedirect.searchParams.set('code', rawCode);
+    if (state) finalRedirect.searchParams.set('state', state);
+
+    return res.redirect(302, finalRedirect.toString());
+  } catch (error) {
+    console.error('[Google Callback Error]', error);
+    return res.status(500).send(renderLoginPage({ error: 'Google login failed: ' + error.message }));
+  }
+};
 
 module.exports = {
   getAuthorizationServerMetadata,
   registerClient,
   showAuthorizePage,
   submitAuthorizePage,
-  issueToken
+  issueToken,
+  handleDirectGoogleLogin,
+  handleGoogleCallback
 };

@@ -30,7 +30,8 @@ app.use(
         'script-src': ["'self'", "'unsafe-inline'", 'https://accounts.google.com'],
         'frame-src': ['https://accounts.google.com']
       }
-    }
+    },
+    crossOriginOpenerPolicy: false
   })
 );
 app.use(
