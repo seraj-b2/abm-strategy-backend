@@ -84,7 +84,7 @@ const registerClient = async (req, res) => {
   }
 };
 
-function renderLoginPage({ error } = {}) {
+function renderLoginPage({ error, nonce } = {}) {
   return `<!doctype html>
 <html>
 <head>
@@ -111,7 +111,7 @@ function renderLoginPage({ error } = {}) {
   <form id="submitForm" method="POST" style="display:none">
     <input type="hidden" name="credential" id="credentialInput" />
   </form>
-  <script>
+  <script nonce="${nonce}">
     function handleCredentialResponse(response) {
       document.getElementById('credentialInput').value = response.credential;
       document.getElementById('submitForm').submit();
@@ -138,7 +138,7 @@ const showAuthorizePage = async (req, res) => {
   }
 
   res.setHeader('Content-Type', 'text/html');
-  return res.status(200).send(renderLoginPage());
+  return res.status(200).send(renderLoginPage({ nonce: res.locals.cspNonce }));
 };
 
 /**
@@ -162,7 +162,9 @@ const submitAuthorizePage = async (req, res) => {
       payload = ticket.getPayload();
     } catch (verifyError) {
       res.setHeader('Content-Type', 'text/html');
-      return res.status(400).send(renderLoginPage({ error: 'Sign-in failed. Please try again.' }));
+      return res
+        .status(400)
+        .send(renderLoginPage({ error: 'Sign-in failed. Please try again.', nonce: res.locals.cspNonce }));
     }
 
     const { sub: googleId, email, name, given_name, family_name, picture } = payload;

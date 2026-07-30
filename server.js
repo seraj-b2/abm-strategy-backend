@@ -1,4 +1,5 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -17,7 +18,21 @@ const app = express();
 connectDB();
 
 // Security and middleware
-app.use(helmet());
+app.use((req, res, next) => {
+  res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
+  next();
+});
+app.use((req, res, next) =>
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        'script-src': ["'self'", 'https://accounts.google.com', `'nonce-${res.locals.cspNonce}'`],
+        'frame-src': ['https://accounts.google.com']
+      }
+    }
+  })(req, res, next)
+);
 app.use(
   cors({
     origin: true, // Allow frontend requests (localhost:5173, etc.)
