@@ -84,7 +84,7 @@ const registerClient = async (req, res) => {
   }
 };
 
-function renderLoginPage({ error, nonce } = {}) {
+function renderLoginPage({ error, loginUri } = {}) {
   return `<!doctype html>
 <html>
 <head>
@@ -104,19 +104,11 @@ function renderLoginPage({ error, nonce } = {}) {
     ${error ? `<div class="error">${error}</div>` : ''}
     <div id="g_id_onload"
       data-client_id="${googleClientId}"
-      data-callback="handleCredentialResponse">
+      data-login_uri="${loginUri}"
+      data-ux_mode="redirect">
     </div>
     <div class="g_id_signin" data-type="standard"></div>
   </div>
-  <form id="submitForm" method="POST" style="display:none">
-    <input type="hidden" name="credential" id="credentialInput" />
-  </form>
-  <script nonce="${nonce}">
-    function handleCredentialResponse(response) {
-      document.getElementById('credentialInput').value = response.credential;
-      document.getElementById('submitForm').submit();
-    }
-  </script>
 </body>
 </html>`;
 }
@@ -137,8 +129,10 @@ const showAuthorizePage = async (req, res) => {
     return res.status(400).json({ error: 'invalid_client', error_description: 'Unknown client_id or redirect_uri' });
   }
 
+  const loginUri = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+
   res.setHeader('Content-Type', 'text/html');
-  return res.status(200).send(renderLoginPage({ nonce: res.locals.cspNonce }));
+  return res.status(200).send(renderLoginPage({ loginUri }));
 };
 
 /**
@@ -161,10 +155,9 @@ const submitAuthorizePage = async (req, res) => {
       const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: googleClientId });
       payload = ticket.getPayload();
     } catch (verifyError) {
+      const loginUri = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
       res.setHeader('Content-Type', 'text/html');
-      return res
-        .status(400)
-        .send(renderLoginPage({ error: 'Sign-in failed. Please try again.', nonce: res.locals.cspNonce }));
+      return res.status(400).send(renderLoginPage({ error: 'Sign-in failed. Please try again.', loginUri }));
     }
 
     const { sub: googleId, email, name, given_name, family_name, picture } = payload;
