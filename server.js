@@ -54,8 +54,9 @@ app.get('/health', (req, res) => {
   });
 });
 
-// OAuth 2.0 Authorization Server metadata (RFC 8414) - must be at root
+// OAuth 2.0 & OpenID Connect Authorization Server metadata (RFC 8414 / OIDC)
 app.get('/.well-known/oauth-authorization-server', getAuthorizationServerMetadata);
+app.get('/.well-known/openid-configuration', getAuthorizationServerMetadata);
 
 // API Routes
 app.use('/auth', authRoutes);
