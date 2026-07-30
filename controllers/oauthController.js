@@ -115,6 +115,19 @@ function renderLoginPage({ error, loginUri } = {}) {
 </html>`;
 }
 
+function getCookie(req, name) {
+  const cookieHeader = req.headers.cookie;
+  if (!cookieHeader) return null;
+  const cookies = cookieHeader.split(';');
+  for (const c of cookies) {
+    const parts = c.trim().split('=');
+    if (parts[0] === name) {
+      return decodeURIComponent(parts.slice(1).join('='));
+    }
+  }
+  return null;
+}
+
 /**
  * GET /oauth/authorize
  * Serves a Google Sign-In page; the form POSTs back to this same endpoint.
@@ -138,7 +151,7 @@ const showAuthorizePage = async (req, res) => {
     return res.status(400).json({ error: 'invalid_client', error_description: 'Unknown client_id or redirect_uri' });
   }
 
-  // Create signed JWT token containing OAuth request parameters so they are not exposed in Google data-login_uri as reserved query params
+  // Create signed JWT token containing OAuth request parameters
   const authReqToken = jwt.sign(
     {
       clientId,
@@ -151,8 +164,14 @@ const showAuthorizePage = async (req, res) => {
     { expiresIn: '15m' }
   );
 
+  // Store in HTTP-Only cookie so data-login_uri remains a static URL without query parameters
+  const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https' || (process.env.PUBLIC_BASE_URL && process.env.PUBLIC_BASE_URL.startsWith('https'));
+  const cookieFlags = `Path=/; HttpOnly; ${isSecure ? 'SameSite=None; Secure' : 'SameSite=Lax'}; Max-Age=900`;
+  res.setHeader('Set-Cookie', `mcp_auth_req=${encodeURIComponent(authReqToken)}; ${cookieFlags}`);
+
+  // Static loginUri matching Google Cloud Console Authorized Redirect URIs exactly
   const baseUrl = getBaseUrl(req);
-  const loginUri = `${baseUrl}/oauth/authorize?auth_req=${encodeURIComponent(authReqToken)}`;
+  const loginUri = `${baseUrl}/oauth/authorize`;
 
   res.setHeader('Content-Type', 'text/html');
   return res.status(200).send(renderLoginPage({ loginUri }));
@@ -170,9 +189,11 @@ const submitAuthorizePage = async (req, res) => {
   let codeChallenge = req.query.code_challenge;
   let codeChallengeMethod = req.query.code_challenge_method;
 
-  if (req.query.auth_req) {
+  const authReqToken = getCookie(req, 'mcp_auth_req') || req.query.auth_req;
+
+  if (authReqToken) {
     try {
-      const decoded = jwt.verify(req.query.auth_req, JWT_SECRET);
+      const decoded = jwt.verify(authReqToken, JWT_SECRET);
       clientId = decoded.clientId;
       redirectUri = decoded.redirectUri;
       state = decoded.state;
@@ -186,6 +207,9 @@ const submitAuthorizePage = async (req, res) => {
       return res.status(400).send(renderLoginPage({ error: 'Session expired. Please try connecting again from your application.', loginUri }));
     }
   }
+
+  // Clear cookie after reading
+  res.setHeader('Set-Cookie', 'mcp_auth_req=; Path=/; HttpOnly; Max-Age=0');
 
   const { credential } = req.body;
 
@@ -205,13 +229,8 @@ const submitAuthorizePage = async (req, res) => {
       if (decoded && decoded.email) {
         payload = decoded;
       } else {
-        const authReqToken = jwt.sign(
-          { clientId, redirectUri, state: state || '', codeChallenge: codeChallenge || '', codeChallengeMethod: codeChallengeMethod || '' },
-          JWT_SECRET,
-          { expiresIn: '15m' }
-        );
         const baseUrl = getBaseUrl(req);
-        const loginUri = `${baseUrl}/oauth/authorize?auth_req=${encodeURIComponent(authReqToken)}`;
+        const loginUri = `${baseUrl}/oauth/authorize`;
         res.setHeader('Content-Type', 'text/html');
         return res.status(400).send(renderLoginPage({ error: 'Sign-in failed. Please try again.', loginUri }));
       }
