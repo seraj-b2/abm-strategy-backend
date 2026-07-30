@@ -19,12 +19,21 @@ function getBaseUrl(req) {
 
 /**
  * GET /.well-known/oauth-authorization-server
- * RFC 8414 authorization server metadata
+ * RFC 8414 authorization server metadata.
+ *
+ * The issuer MUST NOT have a path component here: RFC 8414 requires the
+ * metadata document to live at {issuer-origin}/.well-known/oauth-authorization-server
+ * with no suffix when the issuer itself has no path. Since /api is only a
+ * reverse-proxy routing prefix (not part of this server's real identity),
+ * the issuer is the bare origin (ISSUER_ORIGIN / PUBLIC_ORIGIN), while the
+ * actual endpoint URLs still point through the /api prefix so nginx routes
+ * them to this process.
  */
 const getAuthorizationServerMetadata = (req, res) => {
+  const issuerOrigin = process.env.PUBLIC_ORIGIN || `${req.protocol}://${req.get('host')}`;
   const baseUrl = getBaseUrl(req);
   return res.status(200).json({
-    issuer: baseUrl,
+    issuer: issuerOrigin,
     authorization_endpoint: `${baseUrl}/oauth/authorize`,
     token_endpoint: `${baseUrl}/oauth/token`,
     registration_endpoint: `${baseUrl}/oauth/register`,
