@@ -73,7 +73,7 @@ const getAuthorizationServerMetadata = (req, res) => {
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code'],
     code_challenge_methods_supported: ['S256', 'plain'],
-    token_endpoint_auth_methods_supported: ['client_secret_post', 'none']
+    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic', 'none']
   });
 };
 
@@ -343,12 +343,28 @@ function verifyPkce(codeChallenge, codeChallengeMethod, codeVerifier) {
  */
 const issueToken = async (req, res) => {
   try {
+    let clientId = req.body.client_id;
+    let clientSecret = req.body.client_secret;
+
+    // Check HTTP Authorization: Basic header if credentials missing from body (RFC 6749 section 2.3.1)
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Basic ')) {
+      try {
+        const credentials = Buffer.from(authHeader.split(' ')[1], 'base64').toString('utf8');
+        const colonIdx = credentials.indexOf(':');
+        if (colonIdx !== -1) {
+          clientId = clientId || decodeURIComponent(credentials.substring(0, colonIdx));
+          clientSecret = clientSecret || decodeURIComponent(credentials.substring(colonIdx + 1));
+        }
+      } catch (headerErr) {
+        console.warn('[OAuth Token Warning] Failed to parse Basic auth header:', headerErr.message);
+      }
+    }
+
     const {
       grant_type: grantType,
       code,
       redirect_uri: redirectUri,
-      client_id: clientId,
-      client_secret: clientSecret,
       code_verifier: codeVerifier
     } = req.body;
 
@@ -356,13 +372,17 @@ const issueToken = async (req, res) => {
       return res.status(400).json({ error: 'unsupported_grant_type' });
     }
 
+    if (!clientId) {
+      return res.status(401).json({ error: 'invalid_client', error_description: 'Missing client_id' });
+    }
+
     const client = await OAuthClient.findOne({ clientId });
     if (!client) {
-      return res.status(401).json({ error: 'invalid_client' });
+      return res.status(401).json({ error: 'invalid_client', error_description: 'Unknown client_id' });
     }
 
     if (clientSecret && OAuthClient.hashSecret(clientSecret) !== client.clientSecretHash) {
-      return res.status(401).json({ error: 'invalid_client' });
+      return res.status(401).json({ error: 'invalid_client', error_description: 'Client secret mismatch' });
     }
 
     const codeHash = AuthorizationCode.hashCode(code || '');
