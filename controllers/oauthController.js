@@ -74,7 +74,8 @@ const getAuthorizationServerMetadata = (req, res) => {
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code'],
     code_challenge_methods_supported: ['S256', 'plain'],
-    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic', 'none']
+    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic', 'none'],
+    scopes_supported: ['abm:read', 'abm:write', 'mcp:execute']
   });
 };
 
@@ -116,7 +117,9 @@ const registerClient = async (req, res) => {
       redirect_uris: redirectUris,
       token_endpoint_auth_method: authMethod,
       grant_types: ['authorization_code'],
-      response_types: ['code']
+      response_types: ['code'],
+      client_id_issued_at: Math.floor(Date.now() / 1000),
+      client_secret_expires_at: 0
     });
   } catch (error) {
     console.error('[OAuth Register Error]', error);
@@ -452,9 +455,14 @@ const issueToken = async (req, res) => {
 
     console.log(`[OAuth Token Success] Issued token for user ${authCode.userId} and client ${clientId}`);
 
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Pragma', 'no-cache');
+
     return res.status(200).json({
       access_token: rawToken,
-      token_type: 'bearer'
+      token_type: 'Bearer',
+      expires_in: 2592000,
+      scope: 'abm:read abm:write mcp:execute'
     });
   } catch (error) {
     console.error('[OAuth Token Error]', error);
